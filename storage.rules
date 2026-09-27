@@ -1,0 +1,63 @@
+rules_version = '2';
+
+// Darna Eats Storage rules.
+//  * Only images (jpeg/png/webp) up to 5 MB are accepted.
+//  * Identity documents live under verification/{uid}/ and are readable only
+//    by their owner and staff; they are never exposed through public listings.
+//  * Chat attachments are readable only by the conversation participants.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function roles() { return request.auth.token.get('roles', []); }
+    function isStaff() { return signedIn() && roles().hasAny(['admin', 'moderator']); }
+    function isOwner(userId) { return signedIn() && request.auth.uid == userId; }
+    function isImage() {
+      return request.resource.contentType.matches('image/(jpeg|png|webp)')
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.name.matches('.*\\.(jpg|jpeg|png|webp)$');
+    }
+
+    // Public-facing seller imagery (profile photo, kitchen photo).
+    match /sellers/{userId}/{folder}/{fileName} {
+      allow read: if signedIn();
+      allow write: if isOwner(userId) && folder in ['profile', 'kitchen'] && isImage();
+      allow delete: if isOwner(userId);
+    }
+
+    // Dish photos.
+    match /dishes/{userId}/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if isOwner(userId) && roles().hasAny(['seller']) && isImage();
+      allow delete: if isOwner(userId);
+    }
+
+    // User avatars.
+    match /users/{userId}/avatar/{fileName} {
+      allow read: if signedIn();
+      allow write: if isOwner(userId) && isImage();
+    }
+
+    // Identity documents: private, only uploadable while the application is editable.
+    match /verification/{userId}/{fileName} {
+      allow read: if isOwner(userId) || isStaff();
+      allow create, update: if isOwner(userId) && isImage()
+        && firestore.get(/databases/(default)/documents/sellerVerification/$(userId)).data.status
+             in ['draft', 'changes_requested', 'rejected'];
+      allow delete: if false;
+    }
+
+    // Chat image attachments.
+    match /chat/{conversationId}/{fileName} {
+      function participants() {
+        return firestore.get(/databases/(default)/documents/conversations/$(conversationId)).data.participants;
+      }
+      allow read: if signedIn() && request.auth.uid in participants();
+      allow create: if signedIn() && request.auth.uid in participants() && isImage();
+      allow update, delete: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,309 @@
+rules_version = '2';
+
+// Darna Eats Firestore security rules.
+//
+// Principles:
+//  * Roles come ONLY from auth custom claims (set by Cloud Functions).
+//  * Orders, reviews, reports, notifications, audit logs and seller status
+//    are written exclusively by trusted server code (Admin SDK bypasses rules).
+//  * Public marketplace content is readable only when the seller is approved,
+//    via the server-maintained `sellerApproved` flag.
+//  * Exact addresses/coordinates live in `sellerPrivate` and on orders, never
+//    on public documents.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function signedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+    function roles() { return request.auth.token.get('roles', []); }
+    function hasRole(role) { return signedIn() && roles().hasAny([role]); }
+    function isAdmin() { return hasRole('admin'); }
+    function isStaff() { return hasRole('admin') || hasRole('moderator'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function changedKeys() { return incoming().diff(existing()).affectedKeys(); }
+
+    function sellerProfile(sellerId) {
+      return get(/databases/$(database)/documents/sellerProfiles/$(sellerId));
+    }
+    function isApprovedSeller() {
+      return hasRole('seller') && sellerProfile(uid()).data.status == 'approved';
+    }
+
+    function isStr(v, min, max) { return v is string && v.size() >= min && v.size() <= max; }
+    function isOptStr(v, max) { return v == null || (v is string && v.size() <= max); }
+    function isInt(v, min, max) { return v is int && v >= min && v <= max; }
+    function isNum(v, min, max) { return (v is int || v is float) && v >= min && v <= max; }
+
+    // ---------- users ----------
+    match /users/{userId} {
+      allow read: if signedIn() && (uid() == userId || isStaff());
+      // Profiles are created by the ensureUserProfile function; roles/isActive are server-only.
+      allow create, delete: if false;
+      allow update: if signedIn() && uid() == userId
+        && changedKeys().hasOnly(['displayName', 'photoUrl', 'preferredLanguage', 'updatedAt'])
+        && isStr(incoming().displayName, 0, 80)
+        && isOptStr(incoming().photoUrl, 1000)
+        && incoming().preferredLanguage in ['ar', 'fr'];
+
+      match /pushTokens/{tokenId} {
+        allow read, delete: if signedIn() && uid() == userId;
+        allow create, update: if signedIn() && uid() == userId
+          && incoming().keys().hasOnly(['token', 'type', 'platform', 'updatedAt'])
+          && isStr(incoming().token, 10, 4096)
+          && incoming().type in ['fcm', 'expo']
+          && incoming().platform in ['ios', 'android', 'web'];
+      }
+    }
+
+    // ---------- seller profile (public when approved) ----------
+    function validSellerProfileUpdate() {
+      let d = incoming();
+      return isStr(d.displayName, 0, 60)
+        && isStr(d.story, 0, 1200)
+        && d.specialties is list && d.specialties.size() <= 10
+        && d.serviceAreas is list && d.serviceAreas.size() <= 10
+        && d.pickupAvailable is bool
+        && d.selfDeliveryAvailable is bool
+        && isNum(d.deliveryFee, 0, 50)
+        && isOptStr(d.profilePhotoUrl, 1000)
+        && isOptStr(d.kitchenPhotoUrl, 1000)
+        // Public coordinates must be exactly the approximate centre of the chosen service area.
+        && (d.serviceAreaId == null
+            || (get(/databases/$(database)/documents/serviceAreas/$(d.serviceAreaId)).data.approximateLatitude == d.approximateLatitude
+                && get(/databases/$(database)/documents/serviceAreas/$(d.serviceAreaId)).data.approximateLongitude == d.approximateLongitude));
+    }
+
+    match /sellerProfiles/{sellerId} {
+      allow read: if signedIn() && (existing().status == 'approved' || uid() == sellerId || isStaff());
+      allow create, delete: if false;
+      allow update: if signedIn() && uid() == sellerId && hasRole('seller')
+        && existing().status != 'suspended'
+        && changedKeys().hasOnly([
+          'displayName', 'story', 'profilePhotoUrl', 'kitchenPhotoUrl', 'specialties',
+          'governorateId', 'cityId', 'serviceAreaId', 'serviceAreas',
+          'approximateLatitude', 'approximateLongitude',
+          'pickupAvailable', 'selfDeliveryAvailable', 'deliveryFee', 'updatedAt'])
+        && validSellerProfileUpdate();
+    }
+
+    // ---------- seller verification (private) ----------
+    match /sellerVerification/{sellerId} {
+      allow read: if signedIn() && (uid() == sellerId || isStaff());
+      allow create, delete: if false;
+      allow update: if signedIn() && uid() == sellerId
+        && existing().status in ['draft', 'changes_requested', 'rejected']
+        && changedKeys().hasOnly([
+          'legalFullName', 'identityDocumentPath', 'identityDocumentType', 'kitchenPhotoPath',
+          'hygieneAgreementAccepted', 'foodSafetyAgreementAccepted'])
+        && isStr(incoming().legalFullName, 0, 120)
+        && (incoming().identityDocumentPath == null
+            || incoming().identityDocumentPath.matches('verification/' + sellerId + '/[^/]+'))
+        && (incoming().kitchenPhotoPath == null
+            || incoming().kitchenPhotoPath.matches('sellers/' + sellerId + '/kitchen/[^/]+'))
+        && (incoming().identityDocumentType == null
+            || incoming().identityDocumentType in ['national_id', 'passport', 'residence_permit'])
+        && incoming().hygieneAgreementAccepted is bool
+        && incoming().foodSafetyAgreementAccepted is bool;
+    }
+
+    // ---------- seller private data (exact address) ----------
+    match /sellerPrivate/{sellerId} {
+      allow read: if signedIn() && (uid() == sellerId || isStaff());
+      allow create, delete: if false;
+      allow update: if signedIn() && uid() == sellerId
+        && changedKeys().hasOnly(['pickupAddress', 'contactPhone', 'exactLatitude', 'exactLongitude'])
+        && isStr(incoming().pickupAddress, 0, 300)
+        && isOptStr(incoming().contactPhone, 20)
+        && (incoming().exactLatitude == null || isNum(incoming().exactLatitude, 30, 37.6))
+        && (incoming().exactLongitude == null || isNum(incoming().exactLongitude, 7.4, 11.7));
+    }
+
+    // ---------- catalog & locations (public read, server write) ----------
+    match /categories/{id} { allow read: if true; allow write: if false; }
+    match /governorates/{id} { allow read: if true; allow write: if false; }
+    match /cities/{id} { allow read: if true; allow write: if false; }
+    match /serviceAreas/{id} { allow read: if true; allow write: if false; }
+    match /appSettings/{id} { allow read: if true; allow write: if false; }
+
+    // ---------- dishes ----------
+    function dishClientFields() {
+      return ['sellerId', 'categoryId', 'nameAr', 'nameFr', 'descriptionAr', 'descriptionFr', 'imageUrls',
+        'price', 'currency', 'portionDescriptionAr', 'portionDescriptionFr', 'availableQuantity',
+        'preparationTimeMinutes', 'availabilityType', 'availableFrom', 'availableUntil', 'isDailyMenuItem',
+        'isPreOrder', 'preOrderCutoffAt', 'leadTimeHours', 'spiceLevel', 'dietaryTags', 'allergens',
+        'allergensDeclared', 'isActive', 'isHidden', 'sellerApproved', 'createdAt', 'updatedAt'];
+    }
+    function validDish(d) {
+      return isStr(d.nameAr, 1, 80) && isStr(d.nameFr, 1, 80)
+        && isStr(d.descriptionAr, 0, 1000) && isStr(d.descriptionFr, 0, 1000)
+        && isStr(d.portionDescriptionAr, 0, 120) && isStr(d.portionDescriptionFr, 0, 120)
+        && isStr(d.categoryId, 1, 64)
+        && d.imageUrls is list && d.imageUrls.size() <= 5
+        && isNum(d.price, 0.5, 1000) && d.currency == 'TND'
+        && isInt(d.availableQuantity, 0, 500)
+        && isInt(d.preparationTimeMinutes, 0, 1440)
+        && d.availabilityType in ['today', 'preorder', 'always']
+        && (d.availableFrom == null || d.availableFrom.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))
+        && (d.availableUntil == null || d.availableUntil.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))
+        && d.isDailyMenuItem is bool && d.isPreOrder is bool && d.isActive is bool
+        && (d.leadTimeHours == null || isInt(d.leadTimeHours, 0, 168))
+        && (d.preOrderCutoffAt == null || d.preOrderCutoffAt is timestamp)
+        && isInt(d.spiceLevel, 0, 3)
+        && d.dietaryTags is list && d.dietaryTags.size() <= 8
+        && d.dietaryTags.hasOnly(['halal', 'vegetarian', 'vegan', 'gluten_free', 'dairy_free', 'nut_free', 'spicy', 'not_spicy'])
+        && d.allergens is list && d.allergens.size() <= 12
+        && d.allergensDeclared is bool;
+    }
+
+    match /dishes/{dishId} {
+      allow read: if signedIn() && (
+        (existing().sellerApproved == true && existing().isHidden == false && existing().isActive == true)
+        || existing().sellerId == uid()
+        || isStaff());
+      allow create: if isApprovedSeller()
+        && incoming().sellerId == uid()
+        && incoming().keys().hasOnly(dishClientFields())
+        && incoming().sellerApproved == true
+        && incoming().isHidden == false
+        && validDish(incoming());
+      allow update: if isApprovedSeller()
+        && existing().sellerId == uid()
+        && changedKeys().hasOnly(dishClientFields())
+        && !changedKeys().hasAny(['sellerId', 'sellerApproved', 'isHidden', 'createdAt'])
+        && validDish(incoming());
+      allow delete: if signedIn() && existing().sellerId == uid() && hasRole('seller');
+    }
+
+    // ---------- daily menus ----------
+    match /menus/{menuId} {
+      allow read: if signedIn() && (
+        (existing().status == 'published' && existing().sellerApproved == true)
+        || existing().sellerId == uid()
+        || isStaff());
+      allow create: if isApprovedSeller()
+        && incoming().sellerId == uid()
+        && incoming().sellerApproved == true
+        && incoming().keys().hasOnly(['sellerId', 'date', 'titleAr', 'titleFr', 'descriptionAr', 'descriptionFr',
+             'dishIds', 'status', 'sellerApproved', 'createdAt', 'updatedAt'])
+        && incoming().date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && isStr(incoming().titleAr, 0, 80) && isStr(incoming().titleFr, 0, 80)
+        && incoming().dishIds is list && incoming().dishIds.size() <= 20
+        && incoming().status in ['draft', 'published', 'archived'];
+      allow update: if isApprovedSeller()
+        && existing().sellerId == uid()
+        && changedKeys().hasOnly(['date', 'titleAr', 'titleFr', 'descriptionAr', 'descriptionFr', 'dishIds', 'status', 'updatedAt'])
+        && incoming().date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && incoming().dishIds is list && incoming().dishIds.size() <= 20
+        && incoming().status in ['draft', 'published', 'archived'];
+      allow delete: if signedIn() && existing().sellerId == uid();
+    }
+
+    // ---------- favorites ----------
+    match /favorites/{favoriteId} {
+      allow read, delete: if signedIn() && existing().buyerId == uid();
+      allow create: if signedIn()
+        && incoming().buyerId == uid()
+        && favoriteId == uid() + '_' + incoming().targetType + '_' + incoming().targetId
+        && incoming().keys().hasOnly(['buyerId', 'targetType', 'targetId', 'sellerId', 'title', 'createdAt'])
+        && incoming().targetType in ['seller', 'dish']
+        && isStr(incoming().targetId, 1, 128)
+        && isStr(incoming().title, 0, 120);
+    }
+
+    // ---------- carts (one seller per cart; server re-prices at checkout) ----------
+    match /carts/{buyerId} {
+      allow read, delete: if signedIn() && uid() == buyerId;
+      allow create, update: if signedIn() && uid() == buyerId
+        && incoming().keys().hasOnly(['buyerId', 'sellerId', 'sellerName', 'items', 'subtotal', 'deliveryFee', 'total', 'updatedAt'])
+        && incoming().buyerId == buyerId
+        && incoming().items is list && incoming().items.size() <= 20;
+    }
+
+    // ---------- orders (server-written only) ----------
+    match /orders/{orderId} {
+      allow read: if signedIn() && (existing().buyerId == uid() || existing().sellerId == uid() || isStaff());
+      allow write: if false;
+    }
+
+    // ---------- reviews (post-moderated; server-written) ----------
+    match /reviews/{reviewId} {
+      allow read: if signedIn() && (
+        existing().status in ['visible', 'flagged']
+        || existing().reviewerId == uid()
+        || existing().sellerId == uid()
+        || isStaff());
+      allow write: if false;
+    }
+
+    // ---------- reports (server-written) ----------
+    match /reports/{reportId} {
+      allow read: if signedIn() && (existing().reporterId == uid() || isStaff());
+      allow write: if false;
+    }
+
+    // ---------- chat ----------
+    function isParticipant(convo) { return signedIn() && uid() in convo.participants; }
+
+    match /conversations/{conversationId} {
+      // Staff access goes through the audited adminInspectConversation function only.
+      allow read: if isParticipant(existing());
+      allow create: if signedIn()
+        && incoming().buyerId == uid()
+        && incoming().buyerId != incoming().sellerId
+        && conversationId == incoming().buyerId + '_' + incoming().sellerId
+        && incoming().participants == [incoming().buyerId, incoming().sellerId]
+        && incoming().keys().hasOnly(['buyerId', 'sellerId', 'participants', 'buyerName', 'sellerName', 'orderId',
+             'lastMessageText', 'lastMessageAt', 'buyerUnread', 'sellerUnread', 'createdAt', 'updatedAt'])
+        && incoming().orderId == null
+        && incoming().lastMessageText == null
+        && incoming().buyerUnread == 0 && incoming().sellerUnread == 0
+        && isStr(incoming().buyerName, 0, 80) && isStr(incoming().sellerName, 0, 80)
+        && sellerProfile(incoming().sellerId).data.status == 'approved';
+      // A participant may only reset their own unread counter.
+      allow update: if isParticipant(existing()) && (
+        (uid() == existing().buyerId && changedKeys().hasOnly(['buyerUnread']) && incoming().buyerUnread == 0)
+        || (uid() == existing().sellerId && changedKeys().hasOnly(['sellerUnread']) && incoming().sellerUnread == 0));
+      allow delete: if false;
+
+      function convo() { return get(/databases/$(database)/documents/conversations/$(conversationId)).data; }
+
+      match /messages/{messageId} {
+        allow read: if isParticipant(convo());
+        allow create: if isParticipant(convo())
+          && incoming().senderId == uid()
+          && incoming().keys().hasOnly(['senderId', 'text', 'imagePath', 'isRead', 'createdAt'])
+          && incoming().text is string && incoming().text.size() <= 1000
+          && (incoming().text.size() > 0 || incoming().imagePath != null)
+          && (incoming().imagePath == null
+              || incoming().imagePath.matches('chat/' + conversationId + '/[^/]+'))
+          && incoming().isRead == false
+          && incoming().createdAt == request.time;
+        // Only the recipient can mark a message as read.
+        allow update: if isParticipant(convo())
+          && existing().senderId != uid()
+          && changedKeys().hasOnly(['isRead'])
+          && incoming().isRead == true;
+        allow delete: if false;
+      }
+    }
+
+    // ---------- notifications ----------
+    match /notifications/{notificationId} {
+      allow read: if signedIn() && existing().userId == uid();
+      allow update: if signedIn() && existing().userId == uid()
+        && changedKeys().hasOnly(['isRead']) && incoming().isRead == true;
+      allow create, delete: if false;
+    }
+
+    // ---------- audit logs: append-only, server-written ----------
+    match /auditLogs/{logId} {
+      allow read: if isStaff();
+      allow write: if false;
+    }
+
+    // ---------- internal ----------
+    match /rateLimits/{id} { allow read, write: if false; }
+  }
+}

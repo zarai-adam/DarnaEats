@@ -1,0 +1,75 @@
+{
+  "indexes": [
+    { "collectionGroup": "dishes", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "sellerApproved", "order": "ASCENDING" }, { "fieldPath": "isActive", "order": "ASCENDING" },
+      { "fieldPath": "isHidden", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "dishes", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "sellerApproved", "order": "ASCENDING" }, { "fieldPath": "isActive", "order": "ASCENDING" },
+      { "fieldPath": "isHidden", "order": "ASCENDING" }, { "fieldPath": "categoryId", "order": "ASCENDING" },
+      { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "dishes", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "sellerApproved", "order": "ASCENDING" }, { "fieldPath": "isActive", "order": "ASCENDING" },
+      { "fieldPath": "isHidden", "order": "ASCENDING" }, { "fieldPath": "governorateId", "order": "ASCENDING" },
+      { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "dishes", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "searchTokens", "arrayConfig": "CONTAINS" }, { "fieldPath": "sellerApproved", "order": "ASCENDING" },
+      { "fieldPath": "isActive", "order": "ASCENDING" }, { "fieldPath": "isHidden", "order": "ASCENDING" } ] },
+    { "collectionGroup": "dishes", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "sellerId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "dishes", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "isHidden", "order": "ASCENDING" }, { "fieldPath": "updatedAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "sellerProfiles", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "averageRating", "order": "DESCENDING" } ] },
+    { "collectionGroup": "sellerProfiles", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "governorateId", "order": "ASCENDING" },
+      { "fieldPath": "averageRating", "order": "DESCENDING" } ] },
+    { "collectionGroup": "sellerProfiles", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "updatedAt", "order": "ASCENDING" } ] },
+    { "collectionGroup": "menus", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "sellerId", "order": "ASCENDING" }, { "fieldPath": "date", "order": "DESCENDING" } ] },
+    { "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "buyerId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "sellerId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "sellerId", "order": "ASCENDING" }, { "fieldPath": "status", "order": "ASCENDING" },
+      { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "sellerId", "order": "ASCENDING" }, { "fieldPath": "status", "order": "ASCENDING" },
+      { "fieldPath": "completedAt", "order": "ASCENDING" } ] },
+    { "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "ASCENDING" } ] },
+    { "collectionGroup": "reviews", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "sellerId", "order": "ASCENDING" }, { "fieldPath": "status", "order": "ASCENDING" },
+      { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "reviews", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "sellerId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "reviews", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "reports", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "reports", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "priority", "order": "ASCENDING" },
+      { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "reports", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "reporterId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "conversations", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "participants", "arrayConfig": "CONTAINS" }, { "fieldPath": "updatedAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "notifications", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "notifications", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "isRead", "order": "ASCENDING" } ] },
+    { "collectionGroup": "favorites", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "buyerId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "auditLogs", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "entityType", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "users", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "role", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" } ] }
+  ],
+  "fieldOverrides": [
+    { "collectionGroup": "dishes", "fieldPath": "descriptionAr", "indexes": [] },
+    { "collectionGroup": "dishes", "fieldPath": "descriptionFr", "indexes": [] },
+    { "collectionGroup": "sellerProfiles", "fieldPath": "story", "indexes": [] },
+    { "collectionGroup": "messages", "fieldPath": "text", "indexes": [] }
+  ]
+}
